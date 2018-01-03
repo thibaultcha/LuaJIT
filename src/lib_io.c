@@ -162,9 +162,14 @@ static void io_file_readall(lua_State *L, FILE *fp)
   MSize m, n;
   for (m = LUAL_BUFFERSIZE, n = 0; ; m += m) {
     char *buf = lj_str_needbuf(L, &G(L)->tmpbuf, m);
-    n += (MSize)fread(buf+n, 1, m-n, fp);
-    if (n != m) {
-      setstrV(L, L->top++, lj_str_new(L, buf, (size_t)n));
+    for (;;) {
+      n += (MSize)fread(buf+n, 1, m-n, fp);
+      if (n == m) break;
+      if (ferror(fp)) {
+        if (errno == EINTR) { clearerr(fp); continue; }
+      } else {
+        setstrV(L, L->top++, lj_str_new(L, buf, (size_t)n));
+      }
       lj_gc_check(L);
       return;
     }
@@ -175,10 +180,18 @@ static int io_file_readlen(lua_State *L, FILE *fp, MSize m)
 {
   if (m) {
     char *buf = lj_str_needbuf(L, &G(L)->tmpbuf, m);
-    MSize n = (MSize)fread(buf, 1, m, fp);
-    setstrV(L, L->top++, lj_str_new(L, buf, (size_t)n));
+    MSize n;
+    for (;;) {
+      n = (MSize)fread(buf, 1, m, fp);
+      if (ferror(fp)) {
+        if (errno == EINTR) { clearerr(fp); continue; }
+      } else {
+        setstrV(L, L->top++, lj_str_new(L, buf, (size_t)n));
+      }
+      break;
+    }
     lj_gc_check(L);
-    return (n > 0 || m == 0);
+    return n > 0;
   } else {
     int c = getc(fp);
     ungetc(c, fp);
